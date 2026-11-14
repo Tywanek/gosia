@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Fiszki</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body {
+      background: #f0f2f5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+      touch-action: none;
+    }
+    .stats {
+      margin-bottom: 20px;
+      font-size: 1.1rem;
+      color: #555;
+      font-weight: 600;
+    }
+    .scene {
+      width: 320px;
+      height: 420px;
+      perspective: 1000px;
+      position: relative;
+    }
+    .card {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      transform-style: preserve-3d;
+      transition: transform 0.4s ease, opacity 0.3s ease;
+      cursor: pointer;
+      user-select: none;
+    }
+    .card.is-flipped {
+      transform: rotateY(180deg);
+    }
+    .card.dragging {
+      transition: none;
+    }
+    .card-face {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      backface-visibility: hidden;
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 30px;
+      text-align: center;
+      font-size: 1.8rem;
+      font-weight: bold;
+      color: #222;
+      border: 4px solid transparent;
+      transition: border-color 0.2s;
+    }
+    .card-back {
+      transform: rotateY(180deg);
+      background: #fafafa;
+      color: #0056b3;
+    }
+    .controls {
+      margin-top: 30px;
+      display: flex;
+      gap: 20px;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      font-weight: bold;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      transition: transform 0.1s;
+    }
+    button:active { transform: scale(0.95); }
+    .btn-no { background: #ff4d4f; color: white; }
+    .btn-yes { background: #52c41a; color: white; }
+    .btn-restart { background: #1890ff; color: white; margin-top: 20px; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <div class="stats" id="stats">Ładowanie...</div>
+
+  <div class="scene" id="scene">
+    <div class="card" id="card">
+      <div class="card-face card-front" id="front"></div>
+      <div class="card-face card-back" id="back"></div>
+    </div>
+  </div>
+
+  <div class="controls" id="controls">
+    <button class="btn-no" onclick="handleAnswer(false)">Nie znam (←)</button>
+    <button class="btn-yes" onclick="handleAnswer(true)">Znam (→)</button>
+  </div>
+
+  <div id="done-screen" class="hidden" style="text-align: center;">
+    <h2>Wszystko opanowane! 🎉</h2>
+    <button class="btn-restart" onclick="init()">Powtórz od nowa</button>
+  </div>
+
+  <script>
+    let deck = [];
+    let isFlipped = false;
+    let startX = 0;
+    let currentX = 0;
+    let isDragging = false;
+    let hasMoved = false;
+
+    const card = document.getElementById('card');
+    const frontEl = document.getElementById('front');
+    const backEl = document.getElementById('back');
+    const statsEl = document.getElementById('stats');
+    const sceneEl = document.getElementById('scene');
+    const controlsEl = document.getElementById('controls');
+    const doneScreenEl = document.getElementById('done-screen');
+    const faces = document.querySelectorAll('.card-face');
+
+    async function init() {
+      try {
+        const res = await fetch('./words.json');
+        const data = await res.json();
+        deck = shuffle([...data]);
+        sceneEl.classList.remove('hidden');
+        controlsEl.classList.remove('hidden');
+        doneScreenEl.classList.add('hidden');
+        renderCard();
+      } catch (err) {
+        statsEl.textContent = 'Błąd wczytywania words.json';
+        console.error(err);
+      }
+    }
+
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+      return array;
+    }
+
+    function renderCard() {
+      if (deck.length === 0) {
+        sceneEl.classList.add('hidden');
+        controlsEl.classList.add('hidden');
+        doneScreenEl.classList.remove('hidden');
+        statsEl.textContent = 'Koniec stosu!';
+        return;
+      }
+
+      isFlipped = false;
+      card.style.transition = 'none';
+      card.style.transform = 'translateX(0) rotate(0deg) rotateY(0deg)';
+      card.style.opacity = '1';
+      faces.forEach(f => f.style.borderColor = 'transparent');
+
+      frontEl.textContent = deck[0].front;
+      backEl.textContent = deck[0].back;
+      statsEl.textContent = `Pozostało do zapamiętania: ${deck.length}`;
+
+      // Wymuszenie przerysowania przed przywróceniem animacji
+      void card.offsetWidth;
+      card.style.transition = 'transform 0.4s ease, opacity 0.3s ease';
+    }
+
+    function flipCard() {
+      isFlipped = !isFlipped;
+      updateTransform(0);
+    }
+
+    function updateTransform(deltaX) {
+      const rotateZ = deltaX * 0.05;
+      const rotateY = isFlipped ? 180 : 0;
+      card.style.transform = `translateX(${deltaX}px) rotate(${rotateZ}deg) rotateY(${rotateY}deg)`;
+
+      // Kolorowanie ramki podczas przesuwania
+      if (deltaX > 40) {
+        faces.forEach(f => f.style.borderColor = '#52c41a');
+      } else if (deltaX < -40) {
+        faces.forEach(f => f.style.borderColor = '#ff4d4f');
+      } else {
+        faces.forEach(f => f.style.borderColor = 'transparent');
+      }
+    }
+
+    function handleAnswer(known) {
+      if (deck.length === 0) return;
+
+      const direction = known ? 1 : -1;
+      const rotateY = isFlipped ? 180 : 0;
+      card.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+      card.style.transform = `translateX(${direction * 400}px) rotate(${direction * 20}deg) rotateY(${rotateY}deg)`;
+      card.style.opacity = '0';
+
+      setTimeout(() => {
+        const currentWord = deck.shift();
+        if (!known) {
+          // Jeśli nie znasz, wraca na koniec kolejki
+          deck.push(currentWord);
+        }
+        renderCard();
+      }, 280);
+    }
+
+    // Obsługa dotyku i myszy (Pointer Events)
+    card.addEventListener('pointerdown', (e) => {
+      isDragging = true;
+      hasMoved = false;
+      startX = e.clientX;
+      card.classList.add('dragging');
+      card.setPointerCapture(e.pointerId);
+    });
+
+    card.addEventListener('pointermove', (e) => {
+      if (!isDragging) return;
+      currentX = e.clientX - startX;
+      if (Math.abs(currentX) > 5) hasMoved = true;
+      updateTransform(currentX);
+    });
+
+    card.addEventListener('pointerup', (e) => {
+      if (!isDragging) return;
+      isDragging = false;
+      card.classList.remove('dragging');
+      card.releasePointerCapture(e.pointerId);
+
+      if (!hasMoved) {
+        flipCard();
+      } else if (currentX > 100) {
+        handleAnswer(true);
+      } else if (currentX < -100) {
+        handleAnswer(false);
+      } else {
+        // Powrót na środek, jeśli ruch był za krótki
+        card.style.transition = 'transform 0.3s ease';
+        updateTransform(0);
+      }
+      currentX = 0;
+    });
+
+    // Obsługa klawiatury
+    document.addEventListener('keydown', (e) => {
+      if (deck.length === 0) return;
+      if (e.code === 'Space') { e.preventDefault(); flipCard(); }
+      if (e.code === 'ArrowRight') handleAnswer(true);
+      if (e.code === 'ArrowLeft') handleAnswer(false);
+    });
+
+    init();
+  </script>
+</body>
+</html>
